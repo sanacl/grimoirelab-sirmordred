@@ -2,12 +2,12 @@
 # GPLv3 License
 
 FROM debian:stretch-slim
-MAINTAINER Jesus M. Gonzalez-Barahona <jgb@bitergia.com>
+MAINTAINER Jesus M. Gonzalez-Barahona <jgb@bitergia.com>, Alvaro del Castillo <acs@bitergia.com>
 
-ENV DEBIAN_FRONTEND noninteractive
+ENV GRIMOIRELAB_RELEASE "0.2.1"
 ENV DEPLOY_USER bitergia
 ENV DEPLOY_USER_DIR /home/${DEPLOY_USER}
-ENV SCRIPTS_DIR ${DEPLOY_USER_DIR}/scripts
+ENV CONF_DIR ${DEPLOY_USER_DIR}/conf
 
 # Initial user
 RUN useradd ${DEPLOY_USER} --create-home --shell /bin/bash
@@ -31,27 +31,33 @@ RUN apt-get update && \
 
 RUN echo "${DEPLOY_USER} ALL=NOPASSWD: ALL" >> /etc/sudoers
 
-RUN mkdir -p ${DEPLOY_USER_DIR}/logs ; chown -R ${DEPLOY_USER}:${DEPLOY_USER} ${DEPLOY_USER_DIR}/logs
-VOLUME ["/home/grimoirelog/logs"]
+RUN mkdir -p ${DEPLOY_USER_DIR}/logs
+RUN chown -R ${DEPLOY_USER}:${DEPLOY_USER} ${DEPLOY_USER_DIR}/logs
 
-RUN sed -i -e 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen && \
-    echo 'LANG="en_US.UTF-8"'>/etc/default/locale && \
-    dpkg-reconfigure --frontend=noninteractive locales && \
-    update-locale LANG=en_US.UTF-8
+# forward request and error logs to docker log collector
+RUN ln -sf /dev/stdout ${DEPLOY_USER_DIR}/logs/all.log \
+    && ln -sf /dev/stderr ${DEPLOY_USER_DIR}/logs/all.log
 
-#ADD cacert.pem ${DEPLOY_USER_DIR}/cacert.pem
-#RUN CERT_PATH=`python3 -m requests.certs` && \
-#    cat ${DEPLOY_USER_DIR}/cacert.pem >> ${CERT_PATH}
+# copy a default version of two configuration files
+ADD https://raw.githubusercontent.com/chaoss/grimoirelab-sirmordred/master/aliases.json ${DEPLOY_USER_DIR}/aliases.json
+ADD https://raw.githubusercontent.com/chaoss/grimoirelab-sirmordred/master/menu.yaml ${DEPLOY_USER_DIR}/menu.yml
 
-ENV LANG en_US.UTF-8
-ENV LANGUAGE en_US:en
-ENV LC_ALL en_US.UTF-8
-ENV LANG C.UTF-8
+COPY stage ${DEPLOY_USER_DIR}/stage
 
-ADD stage ${DEPLOY_USER_DIR}/stage
+RUN chmod 444 ${DEPLOY_USER_DIR}/aliases.json
+RUN chmod 444 ${DEPLOY_USER_DIR}/menu.yml
 RUN chmod 755 ${DEPLOY_USER_DIR}/stage
 
 USER ${DEPLOY_USER}
+
+# Do the deployment for GRIMOIRELAB_RELEASE
 WORKDIR ${DEPLOY_USER_DIR}
+
+RUN mkdir -p ${CONF_DIR} && \
+    wget https://raw.githubusercontent.com/chaoss/grimoirelab/master/releases/${GRIMOIRELAB_RELEASE} -O ${CONF_DIR}/requirements.cfg && \
+    echo ${GRIMOIRELAB_RELEASE} > ${DEPLOY_USER_DIR}/release && \
+    git clone https://github.com/grimoirelab/grimoirelab.git --depth 1 && \
+    echo "Installing and checking GrimoireLab Release"
+RUN sudo grimoirelab/utils/build_grimoirelab --build --install --check --install_system --relfile ${CONF_DIR}/requirements.cfg -l debug
 
 CMD ${DEPLOY_USER_DIR}/stage
